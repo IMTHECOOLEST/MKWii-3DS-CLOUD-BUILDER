@@ -1,0 +1,13 @@
+._*
+.DS_Store
+build/
+data/
+assets/
+sd-card/
+emulator/
+.venv/
+node_modules/
+vendor/
+__pycache__/
+.toolchain/
+build-cia-log.txt
