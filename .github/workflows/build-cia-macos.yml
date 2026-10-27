@@ -3,7 +3,8 @@
 # `disc-build` environment (required reviewer = the repository owner).
 #
 # This repository is public. Nothing derived from the disc is ever uploaded,
-# cached, commented or released here: no artifacts, no cache entries (only
+# cached, commented or published here (the only exception, opt-in, is a DRAFT
+# release that only people with write access can see): no artifacts, no cache entries (only
 # public inputs: pip and npm packages), no step summary. The builder's own
 # output is kept in a private file and only step progress reaches the public
 # log. See docs/CI_MACOS.md.
@@ -31,6 +32,10 @@ on:
         description: Stop early unless this many GiB are free after cleanup (0 = no check)
         type: string
         default: '22'
+      upload_draft_release:
+        description: Upload the CIA and SD zips to a DRAFT release of this repo (visible only to people with write access)
+        type: boolean
+        default: false
       verbose_log:
         description: Print the FULL builder output to this PUBLIC log (disc file names, hashes). Debugging only.
         type: boolean
@@ -48,6 +53,8 @@ jobs:
     runs-on: ${{ inputs.runner }}
     environment: disc-build
     timeout-minutes: 330
+    permissions:
+      contents: write   # only so the optional draft-release step can create a draft; checkout does not keep the token
     env:
       SMOKE_TEST: ${{ inputs.smoke_test }}
       MKW_CI_VERBOSE: ${{ inputs.verbose_log && '1' || '0' }}
@@ -132,6 +139,12 @@ jobs:
           OUTPUT_S3_REGION: ${{ secrets.OUTPUT_S3_REGION }}
           OUTPUT_S3_PREFIX: ${{ secrets.OUTPUT_S3_PREFIX }}
         run: bash tools/ci/upload_private.sh
+
+      - name: Upload to a DRAFT release (only people with write access see it)
+        if: inputs.upload_draft_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tools/ci/upload_draft_release.py
 
       - name: Remove the disc image and everything built from it
         if: always()

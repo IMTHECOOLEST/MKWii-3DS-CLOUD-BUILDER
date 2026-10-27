@@ -15,6 +15,7 @@ CI = ROOT / "tools" / "ci"
 sys.path[:0] = [str(CI)]
 import check_cia  # noqa: E402
 import public_log_filter  # noqa: E402
+import upload_draft_release  # noqa: E402
 
 SECRET_PATH = "private-bucket-name/secret-object-key"
 TOKEN = "tok-9f8e7d6c5b4a"
@@ -204,6 +205,21 @@ class CiaCheckTests(unittest.TestCase):
     def test_rejects_non_cia(self):
         with self.assertRaises(ValueError):
             check_cia.cia_title_id(bytes(0x4000))
+
+
+class DraftUploadTests(unittest.TestCase):
+    def test_parts_stay_under_the_limit_and_keep_files_whole(self):
+        sizes = [(f"f{i}", 400) for i in range(10)]
+        parts = upload_draft_release.plan_parts(sizes, limit=1000)
+        self.assertEqual([len(p) for p in parts], [2, 2, 2, 2, 2])
+        self.assertEqual(sum(parts, []), [k for k, _ in sizes])
+
+    def test_a_file_bigger_than_a_part_is_refused(self):
+        with self.assertRaises(SystemExit):
+            upload_draft_release.plan_parts([("big", 2000)], limit=1000)
+
+    def test_empty(self):
+        self.assertEqual(upload_draft_release.plan_parts([]), [])
 
 
 class RedactionTests(unittest.TestCase):

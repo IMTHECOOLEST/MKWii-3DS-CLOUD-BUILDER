@@ -60,9 +60,18 @@ then the builder's own disc and game-code checks) → builds → checks the CIA 
 optional smoke test → optional private upload → always removes the disc and
 everything built from it.
 
-Without *upload_private* nothing leaves the runner: you only get pass or fail.
-With it, the CIA and `sd-card/3ds` (as a tar) go to your private bucket, never
-to GitHub. Files over 5 GiB are skipped (single PUT limit).
+Without an upload option nothing leaves the runner: you only get pass or fail.
+Two ways to get the result out:
+
+- **upload_draft_release** (no extra account): the CIA and the SD-card folder go
+  into a *draft* release of this repository. Only people with write access see a
+  draft; **never press Publish**, and delete it once you have downloaded the
+  files. GitHub allows 2 GiB per file, so the SD-card folder arrives as several
+  ordinary zips: unzip all of them into the root of the SD card. Open the
+  Releases page in a browser to download. (Hosting game data on GitHub, even in
+  a draft, is your call; takedown risk is yours.)
+- **upload_private**: the CIA and `sd-card/3ds` (as a tar) go to your private
+  S3-compatible bucket. Files over 5 GiB are skipped (single PUT limit).
 
 ## What is public and what is not
 
@@ -72,8 +81,10 @@ to GitHub. Files over 5 GiB are skipped (single PUT limit).
 - **Secrets go to the fetch step only**, as `env:`; derived values (the query
   part of a signed URL, the token in a header) are masked; the URL and header
   are never printed and curl's own error text is dropped (it names hosts).
-- **No artifacts, no `actions/cache` for disc data, no releases, comments or
-  step summaries.** Only pip and npm packages are cached.
+- **No artifacts, no `actions/cache` for disc data, no comments or step
+  summaries.** Only pip and npm packages are cached. The one opt-in exception is
+  the draft release above (the job then holds `contents: write`; the token only
+  reaches that step and the smoke step, and the emulator is started without it).
 - **The log is filtered.** The builder prints the name and size of every disc
   file it reads and a receipt with hashes of the CIA. `tools/ci/public_log_filter.py`
   keeps all of that in `build-cia-log.txt` on the runner (never uploaded) and

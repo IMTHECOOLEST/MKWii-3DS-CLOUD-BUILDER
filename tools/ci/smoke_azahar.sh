@@ -98,7 +98,7 @@ done
 
 # 4. Baseline screen, launch, wait, capture.
 screencapture -x -t png baseline.png 2>/dev/null || notverified "screencapture is not allowed on this runner"
-"$bin" "$cci" >emulator-stdout.txt 2>&1 &
+env -u GH_TOKEN -u GITHUB_TOKEN "$bin" "$cci" >emulator-stdout.txt 2>&1 &
 pid=$!
 sleep "$secs"
 kill -0 "$pid" 2>/dev/null || notverified "the emulator exited before the capture"
