@@ -1,0 +1,43 @@
+# THROWAWAY. Run once by hand (Actions > Probe macOS runner > Run workflow) to
+# measure the runners, use the numbers to tune tools/ci/free_disk_macos.sh,
+# then delete this file. No secrets, no checkout, nothing is built.
+name: Probe macOS runner
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - name: Machine
+        run: |
+          uname -m
+          sw_vers
+          sysctl hw.memsize hw.ncpu
+          xcode-select -p
+          ls -d /Applications/Xcode* 2>/dev/null || true
+      - name: Disk
+        run: |
+          echo "--- system volume (read-only, NOT what a job can use):"; df -h /
+          echo "--- data volume (what counts):"; df -h /System/Volumes/Data
+          echo "--- volume holding the home directory:"; df -h "$HOME"
+          df -k "$HOME" | awk 'NR==2 {printf "free for the job: %.1f GiB\n", $4/1048576}'
+      - name: Biggest removable things (GiB)
+        run: |
+          for p in /Applications/Xcode*.app "$HOME/Library/Android" "$HOME/Library/Developer" \
+                   /Library/Developer/CoreSimulator "$HOME/hostedtoolcache" "$HOME/Library/Caches" /usr/local/share/dotnet; do
+            [ -e "$p" ] && du -sk "$p" 2>/dev/null | awk -v p="$p" '{printf "%7.1f  %s\n", $1/1048576, p}'
+          done
+      - name: Rosetta and tool defaults
+        run: |
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then echo "Rosetta: working"; else echo "Rosetta: not available"; fi
+          python3 --version; node --version; git --version; curl --version | head -n 1

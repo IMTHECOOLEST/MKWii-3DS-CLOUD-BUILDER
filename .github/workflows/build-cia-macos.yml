@@ -1,0 +1,138 @@
+# Builds mkw-3ds.cia on a GitHub-hosted macOS runner from the OWNER'S OWN disc,
+# fetched from private storage whose access details are secrets of the
+# `disc-build` environment (required reviewer = the repository owner).
+#
+# This repository is public. Nothing derived from the disc is ever uploaded,
+# cached, commented or released here: no artifacts, no cache entries (only
+# public inputs: pip and npm packages), no step summary. The builder's own
+# output is kept in a private file and only step progress reaches the public
+# log. See docs/CI_MACOS.md.
+name: Build CIA (macOS, own disc)
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: Runner (macos-15 = Apple Silicon, 7 GB RAM; macos-15-intel = 14 GB RAM)
+        type: choice
+        options:
+          - macos-15
+          - macos-15-intel
+        default: macos-15
+      smoke_test:
+        description: Also build a CCI and try to boot it in Azahar (best effort)
+        type: boolean
+        default: false
+      upload_private:
+        description: Upload the CIA and SD files to the private S3-compatible bucket (OUTPUT_S3_* secrets)
+        type: boolean
+        default: false
+      min_free_gb:
+        description: Stop early unless this many GiB are free after cleanup (0 = no check)
+        type: string
+        default: '22'
+      verbose_log:
+        description: Print the FULL builder output to this PUBLIC log (disc file names, hashes). Debugging only.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-cia-macos-disc
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    environment: disc-build
+    timeout-minutes: 330
+    env:
+      SMOKE_TEST: ${{ inputs.smoke_test }}
+      MKW_CI_VERBOSE: ${{ inputs.verbose_log && '1' || '0' }}
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Rosetta 2 (the pinned bannertool is an x86_64 binary)
+        if: runner.arch == 'ARM64'
+        run: sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Free disk space (and stop early if it will not fit)
+        env:
+          MKW_MIN_FREE_GB: ${{ inputs.min_free_gb }}
+        run: bash tools/ci/free_disk_macos.sh
+
+      - name: Install devkitPro (3ds-dev)
+        run: bash tools/ci/install_devkitpro_macos.sh
+
+      - name: Source dependencies
+        run: python tools/bootstrap.py
+
+      - name: Python environment
+        # bootstrap.py first: requirements.txt installs ./vendor/gclib in editable mode.
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --quiet -r requirements.txt
+
+      - name: Fetch disc image
+        # The only step that sees the disc secrets.
+        env:
+          DISC_URL: ${{ secrets.DISC_URL }}
+          DISC_AUTH_HEADER: ${{ secrets.DISC_AUTH_HEADER }}
+          DISC_SHA256: ${{ vars.DISC_SHA256 || secrets.DISC_SHA256 }}
+        run: bash tools/ci/fetch_disc.sh
+
+      - name: Check the disc (fails fast on a modified or wrong image)
+        run: >
+          .venv/bin/python tools/ci/public_log_filter.py build-cia-log.txt --
+          .venv/bin/python tools/ci/preflight_disc.py "$DISC"
+
+      - name: Build the CIA
+        run: |
+          args=()
+          if [ "$SMOKE_TEST" = "true" ]; then args+=(--cci); fi
+          .venv/bin/python tools/ci/public_log_filter.py build-cia-log.txt -- \
+            .venv/bin/python tools/release/build_cia.py "$DISC" ${args[@]+"${args[@]}"}
+
+      - name: Check the CIA
+        run: .venv/bin/python tools/ci/check_cia.py
+
+      - name: Smoke test in Azahar (best effort, software renderer)
+        if: inputs.smoke_test
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          .venv/bin/python tools/ci/check_cia.py --cci
+          bash tools/ci/smoke_azahar.sh
+
+      - name: Upload privately (S3-compatible bucket, never GitHub)
+        if: inputs.upload_private
+        env:
+          OUTPUT_S3_ENDPOINT: ${{ secrets.OUTPUT_S3_ENDPOINT }}
+          OUTPUT_S3_BUCKET: ${{ secrets.OUTPUT_S3_BUCKET }}
+          OUTPUT_S3_ACCESS_KEY_ID: ${{ secrets.OUTPUT_S3_ACCESS_KEY_ID }}
+          OUTPUT_S3_SECRET_ACCESS_KEY: ${{ secrets.OUTPUT_S3_SECRET_ACCESS_KEY }}
+          OUTPUT_S3_REGION: ${{ secrets.OUTPUT_S3_REGION }}
+          OUTPUT_S3_PREFIX: ${{ secrets.OUTPUT_S3_PREFIX }}
+        run: bash tools/ci/upload_private.sh
+
+      - name: Remove the disc image and everything built from it
+        if: always()
+        run: bash tools/ci/cleanup.sh
